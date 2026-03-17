@@ -1,0 +1,10 @@
+CMU-MOSEI_CLEAN_5k/
+data/
+results/
+*.pth
+*.png
+__pycache__/
+*.pyc
+.DS_Store
+venv/
+.env
