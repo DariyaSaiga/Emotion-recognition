@@ -16,7 +16,7 @@ from baseline import LateFusionBaseline
 CONFIG = {
     'data_root':   '/Users/dariyaablanova/Desktop/unic_work/Diploma/model_learning/CMU-MOSEI/CMU-MOSEI_CLEAN_5k',
     'batch_size':  16,
-    'epochs':      10,
+    'epochs':      30,
     'lr':          1e-3,
     'num_workers': 0,
     'num_classes': 7,
