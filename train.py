@@ -16,7 +16,7 @@ from baseline import LateFusionBaseline
 CONFIG = {
     'data_root':   '/Users/dariyaablanova/Desktop/unic_work/Diploma/model_learning/CMU-MOSEI/CMU-MOSEI_CLEAN_5k',
     'batch_size':  16,
-    'epochs':      30,
+    'epochs':      10,
     'lr':          1e-3,
     'num_workers': 0,
     'num_classes': 7,
@@ -73,12 +73,8 @@ def train_epoch(model, loader, optimizer, criterion, device):
         text_inputs = {k: v.to(device) for k, v in batch['text_inputs'].items()}
         labels      = batch['label'].to(device)
 
-        # Visual — пока нули (нет кадров лиц)
-        # Когда появятся кадры — заменить на реальные данные
-        visual = torch.zeros(mel.size(0), 3, 224, 224).to(device)
-
         optimizer.zero_grad()
-        logits = model(text_inputs, mel, visual)
+        logits = model(text_inputs, mel)
         loss   = criterion(logits, labels)
         loss.backward()
         optimizer.step()
@@ -104,9 +100,8 @@ def eval_epoch(model, loader, criterion, device):
             text_inputs = {k: v.to(device) for k, v in batch['text_inputs'].items()}
             labels      = batch['label'].to(device)
 
-            visual = torch.zeros(mel.size(0), 3, 224, 224).to(device)
 
-            logits = model(text_inputs, mel, visual)
+            logits = model(text_inputs, mel)
             loss   = criterion(logits, labels)
 
             total_loss += loss.item()
@@ -176,7 +171,7 @@ def main():
         lr=CONFIG['lr']
     )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', patience=5, factor=0.5, verbose=True
+        optimizer, mode='min', patience=5, factor=0.5
     )
 
     history = {k: [] for k in

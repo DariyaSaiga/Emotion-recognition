@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings('ignore')
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -31,8 +34,9 @@ class TextEncoder(nn.Module):
         cls_embedding = outputs.last_hidden_state[:, 0, :]  # [CLS]
         return cls_embedding  # (B, 768)
 
+
 # =========================
-# Audio Encoder (CNN)
+# Audio Encoder (CNN) — Ablanova
 # =========================
 class AudioEncoder(nn.Module):
     def __init__(self):
@@ -40,26 +44,31 @@ class AudioEncoder(nn.Module):
 
         self.cnn = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.MaxPool2d(2),
 
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d(2),
 
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1))
         )
 
     def forward(self, x):
-        # x: (B, 1, Freq, Time)
+        # x: (B, 1, 64, 128)
         x = self.cnn(x)
         x = x.view(x.size(0), -1)
         return x  # (B, 128)
 
+
 # =========================
-# Visual Encoder (ResNet-18)
+# Visual Encoder (ResNet-18) — Alpieva
+# Пока отключён — нет кадров лиц
 # =========================
 class VisualEncoder(nn.Module):
     def __init__(self):
@@ -67,97 +76,56 @@ class VisualEncoder(nn.Module):
 
         resnet = resnet18(weights=ResNet18_Weights.DEFAULT)
 
-        # freeze ResNet
         for param in resnet.parameters():
             param.requires_grad = False
 
         self.backbone = nn.Sequential(*list(resnet.children())[:-1])
 
     def forward(self, x):
-        # x: (B, 3, H, W)
+        # x: (B, 3, 224, 224)
         x = self.backbone(x)
         x = x.view(x.size(0), -1)
         return x  # (B, 512)
 
+
 # =========================
 # Late Fusion Baseline
+# Сейчас: Audio + Text (без Visual — нет кадров)
+# Потом:  Audio + Text + Visual (добавим когда будут кадры)
 # =========================
 class LateFusionBaseline(nn.Module):
-    def __init__(self, num_classes=6):
+    def __init__(self, num_classes=7, use_visual=False):
         super().__init__()
 
-        self.text_encoder = TextEncoder()
+        self.use_visual = use_visual
+        self.text_encoder  = TextEncoder()
         self.audio_encoder = AudioEncoder()
-        self.visual_encoder = VisualEncoder()
 
-        fusion_dim = 768 + 128 + 512
+        if use_visual:
+            self.visual_encoder = VisualEncoder()
+            fusion_dim = 768 + 128 + 512  # text + audio + visual
+        else:
+            fusion_dim = 768 + 128         # text + audio только
 
         self.classifier = nn.Sequential(
-            nn.Linear(fusion_dim, 512),
+            nn.Linear(fusion_dim, 256),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(512, num_classes)
+            nn.Linear(256, num_classes)
         )
 
-    def forward(self, text_inputs, audio_inputs, visual_inputs):
-        text_feat = self.text_encoder(
+    def forward(self, text_inputs, audio_inputs, visual_inputs=None):
+        text_feat  = self.text_encoder(
             text_inputs["input_ids"],
             text_inputs["attention_mask"]
-        )
-        audio_feat = self.audio_encoder(audio_inputs)
-        visual_feat = self.visual_encoder(visual_inputs)
+        )                                    # (B, 768)
+        audio_feat = self.audio_encoder(audio_inputs)  # (B, 128)
 
-        fused = torch.cat([text_feat, audio_feat, visual_feat], dim=1)
+        if self.use_visual and visual_inputs is not None:
+            visual_feat = self.visual_encoder(visual_inputs)  # (B, 512)
+            fused = torch.cat([text_feat, audio_feat, visual_feat], dim=1)
+        else:
+            fused = torch.cat([text_feat, audio_feat], dim=1)  # (B, 896)
+
         logits = self.classifier(fused)
-
         return logits
-
-# =========================
-# Dummy Data (for testing)
-# =========================
-def get_dummy_batch(batch_size=2):
-    text_inputs = {
-        "input_ids": torch.randint(0, 1000, (batch_size, 32)).to(device),
-        "attention_mask": torch.ones(batch_size, 32).to(device)
-    }
-
-    audio_inputs = torch.randn(batch_size, 1, 64, 128).to(device)
-    visual_inputs = torch.randn(batch_size, 3, 224, 224).to(device)
-    labels = torch.randint(0, 6, (batch_size,)).to(device)
-
-    return text_inputs, audio_inputs, visual_inputs, labels
-
-# =========================
-# Training Step
-# =========================
-def train_step(model, optimizer, criterion):
-    model.train()
-
-    text_inputs, audio_inputs, visual_inputs, labels = get_dummy_batch()
-
-    optimizer.zero_grad()
-    outputs = model(text_inputs, audio_inputs, visual_inputs)
-    loss = criterion(outputs, labels)
-
-    loss.backward()
-    optimizer.step()
-
-    return loss.item()
-
-# =========================
-# Main
-# =========================
-if __name__ == "__main__":
-    model = LateFusionBaseline(num_classes=6).to(device)
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=1e-3
-    )
-
-    print("Model initialized.")
-
-    for epoch in range(3):
-        loss = train_step(model, optimizer, criterion)
-        print(f"Epoch {epoch+1} | Loss: {loss:.4f}")

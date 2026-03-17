@@ -88,7 +88,8 @@ class CMUMOSEIDataset(Dataset):
         label      = self._get_label(row)
 
         # Имя wav файла
-        audio_filename = f"{video_id}_{start_time}.wav"
+        end_time = float(row['end_time'])
+        audio_filename = f"{video_id}_{start_time}_{end_time:.4f}.wav"
         audio_path = os.path.join(self.audio_dir, audio_filename)
         mel = self._load_mel(audio_path)
 
