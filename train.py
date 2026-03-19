@@ -14,7 +14,7 @@ from baseline import LateFusionBaseline
 # НАСТРОЙКИ — меняй только здесь
 # ══════════════════════════════════════════════
 CONFIG = {
-    'data_root':   '/Users/dariyaablanova/Desktop/unic_work/Diploma/model_learning/CMU-MOSEI/CMU-MOSEI_CLEAN_5k',
+    'data_root': 'C:/Users/Лейла/Desktop/CMU-MOSEI/CMU-MOSEI_CLEAN_5k',
     'batch_size':  16,
     'epochs':      30,
     'lr':          1e-3,

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision.models as tv_models
 from transformers import BertModel, BertTokenizer
+import torch.nn.functional as F
 
 
 # ══════════════════════════════════════════════════════
@@ -194,12 +195,24 @@ class BaselineLateFusion(nn.Module):
 
     def __init__(self, num_classes=7, feat_dim=256, use_visual=False):
         super().__init__()
-
+        
         self.use_visual = use_visual
         self.feat_dim   = feat_dim
 
         self.audio_encoder  = AudioCNNEncoder(output_dim=feat_dim)
         self.text_encoder   = TextBERTEncoder(output_dim=feat_dim)
+        self.bottleneck_fusion = AttentionBottleneck(
+        feat_dim=feat_dim,
+        num_tokens=4
+)
+
+        # вход в классификатор теперь = 256 (а не 512/768)
+        self.classifier = nn.Sequential(
+            nn.Linear(feat_dim, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(128, num_classes),
+        )
 
         if use_visual:
             self.visual_encoder = VisualResNetEncoder(output_dim=feat_dim)
@@ -216,6 +229,7 @@ class BaselineLateFusion(nn.Module):
             nn.Dropout(0.3),
             nn.Linear(128, num_classes),
         )
+        
 
     def forward(self, mel, texts, device, frames=None):
         """
@@ -227,11 +241,69 @@ class BaselineLateFusion(nn.Module):
         audio_feat = self.audio_encoder(mel)           # (B, 256)
         text_feat  = self.text_encoder(texts, device)  # (B, 256)
 
+        # собираем модальности как sequence
         if self.use_visual and frames is not None:
-            visual_feat = self.visual_encoder(frames)  # (B, 256)
-            fused = torch.cat([audio_feat, text_feat, visual_feat], dim=1)  # (B, 768)
+            visual_feat = self.visual_encoder(frames)
+            features = torch.stack([audio_feat, text_feat, visual_feat], dim=1)  # (B, 3, 256)
         else:
-            fused = torch.cat([audio_feat, text_feat], dim=1)               # (B, 512)
+            features = torch.stack([audio_feat, text_feat], dim=1)  # (B, 2, 256)
 
-        logits = self.classifier(fused)                # (B, 7)
+        # bottleneck fusion
+        fused = self.bottleneck_fusion(features)  # (B, 256)
+
+        # классификация
+        logits = self.classifier(fused)
         return logits
+    
+
+
+
+class AttentionBottleneck(nn.Module):
+    """
+    Attention Bottleneck для объединения модальностей.
+    """
+
+    def __init__(self, feat_dim=256, num_tokens=4, num_heads=4):
+        super().__init__()
+
+        self.num_tokens = num_tokens
+        self.feat_dim = feat_dim
+
+        # bottleneck токены (обучаемые)
+        self.bottleneck = nn.Parameter(
+            torch.randn(1, num_tokens, feat_dim)
+        )
+
+        # Multihead Attention
+        self.attn = nn.MultiheadAttention(
+            embed_dim=feat_dim,
+            num_heads=num_heads,
+            batch_first=True
+        )
+
+        self.norm = nn.LayerNorm(feat_dim)
+
+    def forward(self, features):
+        """
+        features: (B, M, 256)
+        M = количество модальностей (2 или 3)
+        """
+
+        B = features.size(0)
+
+        # повторяем bottleneck под batch
+        bottleneck = self.bottleneck.repeat(B, 1, 1)  # (B, N, 256)
+
+        # attention: bottleneck "смотрит" на модальности
+        attended, _ = self.attn(
+            query=bottleneck,
+            key=features,
+            value=features
+        )
+
+        out = self.norm(attended + bottleneck)  # residual
+
+        # усредняем bottleneck токены → один вектор
+        out = out.mean(dim=1)  # (B, 256)
+
+        return out
