@@ -152,7 +152,8 @@ def save_plots(history, model_name, output_dir):
 def main():
     args = parse_args()
     set_seed(args.seed)
-
+    SAVE_DIR = "/content/drive/MyDrive/Diploma/checkpoints"
+    os.makedirs(SAVE_DIR, exist_ok=True)
     output_dir = args.output_dir or os.path.join('results', args.model)
     os.makedirs(output_dir, exist_ok=True)
 
@@ -237,9 +238,23 @@ def main():
             best_val_wa = vl_wa
             best_epoch  = epoch
             torch.save(model.state_dict(), model_path)
+        
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "best_val_f1": best_val_f1,
+        }
+        torch.save(checkpoint, os.path.join(SAVE_DIR, f"checkpoint_epoch_{epoch+1}.pt"))
 
     # ── Финальный тест ────────────────────────────────────────────
     print('─' * 50)
+    with open(os.path.join(SAVE_DIR, "train_log.txt"), "a", encoding="utf-8") as f:
+        f.write(
+            f"Epoch {epoch:02d}: "
+            f"train_loss={tr_loss:.4f}, train_WA={tr_wa:.4f}, train_F1={tr_f1:.4f}, "
+            f"val_loss={vl_loss:.4f}, val_WA={vl_wa:.4f}, val_F1={vl_f1:.4f}\n"
+        )
     print('Финальный тест...')
     model.load_state_dict(torch.load(model_path))
     ts_loss, ts_wa, ts_f1, preds, labels_true = eval_epoch(
