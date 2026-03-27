@@ -1,17 +1,3 @@
-"""
-dataset.py — загрузка CMU-MOSEI из cmu_mosei_final.csv
-
-Формат CSV:
-    video_id | text | label | audio_feat_0..73 (74 cols) | visual_feat_0..34 (35 cols)
-
-Классы:
-    0 = happy
-    1 = sad
-    2 = anger
-
-Автоматически делает stratified split: train/val/test = 70/15/15
-"""
-
 import numpy as np
 import pandas as pd
 import torch

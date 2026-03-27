@@ -140,7 +140,7 @@ class LateFusionBaseline(nn.Module):
         super().__init__()
 
         self.text_encoder   = TextEncoder(output_dim=feat_dim, bert_name=bert_name)
-        self.audio_encoder  = AudioMLPEncoder(output_dim=feat_dim)
+        self.audio_encoder = AudioCNNEncoder(output_dim=feat_dim)
         self.visual_encoder = VisualMLPEncoder(output_dim=feat_dim)
 
         fusion_dim = feat_dim * 3   # 768 = 256 + 256 + 256

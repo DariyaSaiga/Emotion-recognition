@@ -1,14 +1,3 @@
-"""
-train.py — обучение моделей на CMU-MOSEI
-
-Запуск:
-    python train.py --model baseline --csv /path/to/cmu_mosei_final.csv
-    python train.py --model bottleneck --csv /path/to/cmu_mosei_final.csv
-
-В Colab:
-    !python train.py --model baseline --csv /content/drive/MyDrive/Diploma/cmu_mosei_final.csv
-"""
-
 import os
 import argparse
 import torch
