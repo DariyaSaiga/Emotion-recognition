@@ -196,7 +196,7 @@ def main():
         lr=args.lr, weight_decay=1e-4
     )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', patience=5, factor=0.5, verbose=True
+        optimizer, mode='max', patience=5, factor=0.5
     )
 
     # ── История ───────────────────────────────────────────────────
