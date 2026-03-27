@@ -243,7 +243,7 @@ def main():
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
-            "best_val_f1": best_val_f1,
+            "best_val_wa": best_val_wa,
         }
         torch.save(checkpoint, os.path.join(SAVE_DIR, f"checkpoint_epoch_{epoch+1}.pt"))
 
