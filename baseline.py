@@ -1,20 +1,3 @@
-"""
-baseline.py — Late Fusion Baseline для CMU-MOSEI
-
-Архитектура:
-    Text   (BERT → [CLS] 768-dim)  → Linear → 256-dim → ReLU → Dropout
-    Audio  (COVAREP 74-dim)         →  MLP   → 256-dim → ReLU → Dropout
-    Visual (Facet42 35-dim)         →  MLP   → 256-dim → ReLU → Dropout
-                                          ↓
-                              Concat → 768-dim
-                                          ↓
-                              FC Classifier → 3 класса
-
-Сравнение с Bottleneck Transformer (bottleneck.py):
-    Baseline: простое конкатенирование, нет взаимодействия между модальностями
-    Bottleneck: информация проходит через общие bottleneck-токены
-"""
-
 import torch
 import torch.nn as nn
 from transformers import BertModel
@@ -55,28 +38,59 @@ class TextEncoder(nn.Module):
         return self.proj(cls)                   # (B, 256)
 
 
-class AudioMLPEncoder(nn.Module):
+class AudioCNNEncoder(nn.Module):
     """
-    MLP на pre-extracted COVAREP аудио признаках (74-dim).
-    74 → 128 → 256
+    1D CNN энкодер на COVAREP признаках (74-dim).
+    
+    Вход:  (B, 74)
+    Выход: (B, 256)
+    
+    Архитектура:
+        (B, 74) → reshape → (B, 1, 74)   # как 1D сигнал
+        → Conv1d(1→32, k=3) → BN → ReLU
+        → Conv1d(32→64, k=3) → BN → ReLU
+        → Conv1d(64→128, k=3) → BN → ReLU
+        → AdaptiveAvgPool → Flatten
+        → Linear(128→256) → ReLU → Dropout
     """
 
-    def __init__(self, input_dim: int = AUDIO_DIM,
-                 output_dim: int = 256):
+    def __init__(self, input_dim: int = 74, output_dim: int = 256):
         super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(input_dim, 128),
+
+        self.conv_layers = nn.Sequential(
+            # Блок 1: (B, 1, 74) → (B, 32, 72)
+            nn.Conv1d(1, 32, kernel_size=3, padding=0),
+            nn.BatchNorm1d(32),
+            nn.ReLU(inplace=True),
+
+            # Блок 2: (B, 32, 72) → (B, 64, 70)
+            nn.Conv1d(32, 64, kernel_size=3, padding=0),
+            nn.BatchNorm1d(64),
+            nn.ReLU(inplace=True),
+
+            # Блок 3: (B, 64, 70) → (B, 128, 68)
+            nn.Conv1d(64, 128, kernel_size=3, padding=0),
             nn.BatchNorm1d(128),
             nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            nn.Linear(128, output_dim),
+        )
+
+        # Усредняем по временному измерению → (B, 128, 1)
+        self.pool = nn.AdaptiveAvgPool1d(1)
+
+        self.head = nn.Sequential(
+            nn.Flatten(),                    # (B, 128)
+            nn.Linear(128, output_dim),      # (B, 256)
             nn.ReLU(inplace=True),
             nn.Dropout(0.3),
         )
 
     def forward(self, x):
         """x: (B, 74)"""
-        return self.mlp(x)   # (B, 256)
+        x = x.unsqueeze(1)       # (B, 1, 74) — добавляем канал
+        x = self.conv_layers(x)  # (B, 128, 68)
+        x = self.pool(x)         # (B, 128, 1)
+        x = self.head(x)         # (B, 256)
+        return x
 
 
 class VisualMLPEncoder(nn.Module):
