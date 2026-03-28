@@ -1,38 +1,3 @@
-"""
-bottleneck.py — Bottleneck Transformer для мультимодального распознавания эмоций
-
-Архитектура (Nagrani et al. 2021 — "Attention Bottlenecks for Multimodal Fusion"):
-
-    ┌─────────────┐   ┌─────────────┐   ┌──────────────┐
-    │  Text BERT  │   │ Audio 1DCNN │   │Visual BiLSTM │
-    │ (768→d_model)│  │ (74→d_model)│   │ (35→d_model) │
-    └──────┬──────┘   └──────┬──────┘   └──────┬───────┘
-           │                 │                  │
-    ┌──────▼──────────────────▼──────────────────▼──────┐
-    │              Fusion с Bottleneck-токенами          │
-    │                                                    │
-    │  [t₁, t₂, ... | b₁, b₂, ... | a₁ | v₁]          │
-    │                                ↑                   │
-    │              B общих Bottleneck токенов            │
-    │        (только через них проходит кросс-инфо)      │
-    └──────────────────────────────────────────────────┘
-           │
-    ┌──────▼──────┐
-    │  Classifier │  → 3 класса
-    └─────────────┘
-
-Ключевая идея:
-    1. Каждая модальность видит только свои токены + B bottleneck-токенов
-    2. Bottleneck-токены — общие, через них протекает кросс-модальная информация
-    3. После каждого слоя Transformer обновляем bottleneck
-    4. Это избегает квадратичного attention между всеми токенами всех модальностей
-    5. Bottleneck вынужден сжать информацию → учится выделять главное
-
-Сравнение с baseline (Late Fusion):
-    Baseline:   Text_feat + Audio_feat + Visual_feat → Concat → MLP → label
-    Bottleneck: Взаимодействие через attention на каждом слое → более богатые признаки
-"""
-
 import math
 import torch
 import torch.nn as nn
@@ -263,7 +228,41 @@ class BottleneckFusionLayer(nn.Module):
 
         return updated_tokens, bottleneck_new
 
+class AudioCNNProjector(nn.Module):
+    """
+    1D CNN проектор для COVAREP аудио признаков (74-dim) → d_model.
+    Тот же CNN что в baseline, но выход адаптирован для Bottleneck.
+    """
+    def __init__(self, input_dim: int = 74, d_model: int = 128):
+        super().__init__()
 
+        self.conv_layers = nn.Sequential(
+            nn.Conv1d(1, 32, kernel_size=3, padding=0),
+            nn.BatchNorm1d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(32, 64, kernel_size=3, padding=0),
+            nn.BatchNorm1d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(64, 128, kernel_size=3, padding=0),
+            nn.BatchNorm1d(128),
+            nn.ReLU(inplace=True),
+        )
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(128, d_model),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+        )
+
+    def forward(self, x):
+        """x: (B, 74) → (B, 1, d_model)"""
+        x = x.unsqueeze(1)        # (B, 1, 74)
+        x = self.conv_layers(x)   # (B, 128, 68)
+        x = self.pool(x)          # (B, 128, 1)
+        x = self.head(x)          # (B, d_model)
+        return x.unsqueeze(1)     # (B, 1, d_model) — один токен
+    
 # ══════════════════════════════════════════════════════════════════
 # 4. BOTTLENECK TRANSFORMER — ГЛАВНАЯ МОДЕЛЬ
 # ══════════════════════════════════════════════════════════════════
@@ -301,8 +300,8 @@ class BottleneckTransformer(nn.Module):
         self.text_projector   = TextProjector(
             d_model=d_model, num_tokens=text_tokens, bert_name=bert_name
         )
-        self.audio_projector  = ModalityProjector(
-            input_dim=AUDIO_DIM, d_model=d_model, num_tokens=1
+        self.audio_projector = AudioCNNProjector(
+            input_dim=AUDIO_DIM, d_model=d_model
         )
         self.visual_projector = VisualBiLSTMProjector(
             d_model=d_model
