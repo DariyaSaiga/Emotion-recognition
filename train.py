@@ -25,7 +25,7 @@ def parse_args():
                         help='Путь к cmu_mosei_final.csv')
     parser.add_argument('--epochs',     type=int, default=30)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--lr',         type=float, default=1e-3)
+    parser.add_argument('--lr',         type=float, default=3e-4)
     parser.add_argument('--output_dir', type=str, default=None,
                         help='Папка для сохранения (по умолчанию results/<model>)')
     parser.add_argument('--num_workers',type=int, default=0)
@@ -221,7 +221,8 @@ def main():
     print(f"{'─'*50}")
     print(f"Начинаем обучение: {args.epochs} эпох")
     print(f"{'─'*50}\n")
-
+    
+    no_improve = 0
     for epoch in range(1, args.epochs + 1):
         print(f"Эпоха {epoch:02d}/{args.epochs}")
 
@@ -246,7 +247,13 @@ def main():
         if vl_wa > best_val_wa:
             best_val_wa = vl_wa
             best_epoch  = epoch
+            no_improve  = 0
             torch.save(model.state_dict(), model_path)
+        else:
+            no_improve += 1
+            if no_improve >= 10:
+                print(f"⛔ Early stopping на эпохе {epoch}")
+                break
         
         
 
