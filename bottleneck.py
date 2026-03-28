@@ -3,10 +3,10 @@ bottleneck.py — Bottleneck Transformer для мультимодального
 
 Архитектура (Nagrani et al. 2021 — "Attention Bottlenecks for Multimodal Fusion"):
 
-    ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-    │  Text BERT  │   │  Audio MLP  │   │ Visual MLP  │
-    │ (768→d_model)│  │ (74→d_model)│   │(35→d_model) │
-    └──────┬──────┘   └──────┬──────┘   └──────┬──────┘
+    ┌─────────────┐   ┌─────────────┐   ┌──────────────┐
+    │  Text BERT  │   │ Audio 1DCNN │   │Visual BiLSTM │
+    │ (768→d_model)│  │ (74→d_model)│   │ (35→d_model) │
+    └──────┬──────┘   └──────┬──────┘   └──────┬───────┘
            │                 │                  │
     ┌──────▼──────────────────▼──────────────────▼──────┐
     │              Fusion с Bottleneck-токенами          │
@@ -44,6 +44,56 @@ from dataset import AUDIO_DIM, VISUAL_DIM, NUM_CLASSES
 # ══════════════════════════════════════════════════════════════════
 # 1. ПРОЕКЦИЯ МОДАЛЬНОСТЕЙ В ОБЩЕЕ ПРОСТРАНСТВО
 # ══════════════════════════════════════════════════════════════════
+
+class VisualBiLSTMProjector(nn.Module):
+    """
+    BiLSTM проектор для визуальных Facet42 признаков (35-dim) → d_model.
+
+    Разбиваем вектор (B, 35) на последовательность (B, 7, 5),
+    пропускаем через BiLSTM, берём последний hidden state,
+    проецируем в d_model и оборачиваем в токен (B, 1, d_model).
+    """
+
+    def __init__(self, d_model: int,
+                 input_dim: int = VISUAL_DIM,
+                 hidden_dim: int = 64,
+                 num_layers: int = 2):
+        super().__init__()
+
+        self.seq_len  = 7
+        self.step_dim = input_dim // self.seq_len  # 5
+
+        self.bilstm = nn.LSTM(
+            input_size=self.step_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=True,
+            dropout=0.1,
+        )
+
+        self.proj = nn.Sequential(
+            nn.Linear(hidden_dim * 2, d_model),
+            nn.LayerNorm(d_model),
+            nn.ReLU(inplace=True),
+        )
+        # Learnable modality embedding (как в ModalityProjector)
+        self.modality_emb = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
+
+    def forward(self, x):
+        """x: (B, 35) → (B, 1, d_model)"""
+        B = x.size(0)
+        x = x.view(B, self.seq_len, self.step_dim)  # (B, 7, 5)
+
+        _, (hidden, _) = self.bilstm(x)             # hidden: (layers*2, B, 64)
+        forward_h  = hidden[-2]                      # (B, 64)
+        backward_h = hidden[-1]                      # (B, 64)
+        combined   = torch.cat([forward_h, backward_h], dim=1)  # (B, 128)
+
+        out = self.proj(combined).unsqueeze(1)       # (B, 1, d_model)
+        out = out + self.modality_emb                # + modality embedding
+        return out
+
 
 class ModalityProjector(nn.Module):
     """
@@ -254,8 +304,8 @@ class BottleneckTransformer(nn.Module):
         self.audio_projector  = ModalityProjector(
             input_dim=AUDIO_DIM, d_model=d_model, num_tokens=1
         )
-        self.visual_projector = ModalityProjector(
-            input_dim=VISUAL_DIM, d_model=d_model, num_tokens=1
+        self.visual_projector = VisualBiLSTMProjector(
+            d_model=d_model
         )
 
         # ── Learnable Bottleneck токены ───────────────────────────

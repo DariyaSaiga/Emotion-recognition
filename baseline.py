@@ -93,28 +93,59 @@ class AudioCNNEncoder(nn.Module):
         return x
 
 
-class VisualMLPEncoder(nn.Module):
+class VisualBiLSTMEncoder(nn.Module):
     """
-    MLP на pre-extracted Facet42 визуальных признаках (35-dim).
-    35 → 128 → 256
+    BiLSTM энкодер на Facet42 визуальных признаках (35-dim).
+
+    Вход:  (B, 35) — усреднённые по времени признаки лица
+    Выход: (B, 256)
+
+    Так как у нас признаки уже усреднены по времени,
+    мы разбиваем вектор на 7 шагов по 5 признаков —
+    это позволяет BiLSTM видеть структуру признаков.
+
+    35 → reshape (7, 5) → BiLSTM(5, 64) → последний hidden → Linear → 256
     """
 
     def __init__(self, input_dim: int = VISUAL_DIM,
+                 hidden_dim: int = 64,
+                 num_layers: int = 2,
                  output_dim: int = 256):
         super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(input_dim, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            nn.Linear(128, output_dim),
+
+        self.seq_len  = 7                        # разбиваем 35 признаков на 7 шагов
+        self.step_dim = input_dim // self.seq_len  # 5 признаков на шаг
+
+        self.bilstm = nn.LSTM(
+            input_size=self.step_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=True,   # ← это и есть Bi
+            dropout=0.3,
+        )
+
+        self.head = nn.Sequential(
+            nn.Linear(hidden_dim * 2, output_dim),  # *2 потому что bidirectional
             nn.ReLU(inplace=True),
             nn.Dropout(0.3),
         )
 
     def forward(self, x):
         """x: (B, 35)"""
-        return self.mlp(x)   # (B, 256)
+        B = x.size(0)
+        # Разбиваем (B, 35) → (B, 7, 5)
+        x = x.view(B, self.seq_len, self.step_dim)
+
+        # BiLSTM → out: (B, 7, 128), hidden: (num_layers*2, B, 64)
+        _, (hidden, _) = self.bilstm(x)
+
+        # Берём последний слой: forward[-2] и backward[-1]
+        forward_h  = hidden[-2]                                  # (B, 64)
+        backward_h = hidden[-1]                                  # (B, 64)
+        combined   = torch.cat([forward_h, backward_h], dim=1)  # (B, 128)
+
+        return self.head(combined)  # (B, 256)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -141,7 +172,7 @@ class LateFusionBaseline(nn.Module):
 
         self.text_encoder   = TextEncoder(output_dim=feat_dim, bert_name=bert_name)
         self.audio_encoder = AudioCNNEncoder(output_dim=feat_dim)
-        self.visual_encoder = VisualMLPEncoder(output_dim=feat_dim)
+        self.visual_encoder = VisualBiLSTMEncoder(output_dim=feat_dim)
 
         fusion_dim = feat_dim * 3   # 768 = 256 + 256 + 256
 
