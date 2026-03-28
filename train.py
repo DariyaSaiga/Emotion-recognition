@@ -221,7 +221,7 @@ def main():
     print(f"{'─'*50}")
     print(f"Начинаем обучение: {args.epochs} эпох")
     print(f"{'─'*50}\n")
-    
+
     no_improve = 0
     for epoch in range(1, args.epochs + 1):
         print(f"Эпоха {epoch:02d}/{args.epochs}")
@@ -251,7 +251,7 @@ def main():
             torch.save(model.state_dict(), model_path)
         else:
             no_improve += 1
-            if no_improve >= 10:
+            if no_improve >= 50:
                 print(f"⛔ Early stopping на эпохе {epoch}")
                 break
         
