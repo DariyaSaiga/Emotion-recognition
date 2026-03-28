@@ -17,8 +17,9 @@ from dataset import get_dataloaders, CLASS_WEIGHTS, EMOTION_NAMES
 def parse_args():
     parser = argparse.ArgumentParser(description='Обучение модели на CMU-MOSEI')
     parser.add_argument('--model',      type=str, default='baseline',
-                        choices=['baseline', 'bottleneck'],
-                        help='Тип модели: baseline или bottleneck')
+                        choices=['baseline', 'bottleneck',
+                                 'text_only', 'audio_only', 'visual_only'],
+                        help='Тип модели')
     parser.add_argument('--csv',        type=str, required=True,
                         help='Путь к cmu_mosei_final.csv')
     parser.add_argument('--epochs',     type=int, default=30)
@@ -178,6 +179,15 @@ def main():
     elif args.model == 'bottleneck':
         from bottleneck import BottleneckTransformer
         model = BottleneckTransformer().to(device)
+    elif args.model == 'text_only':
+        from baseline import TextOnlyModel
+        model = TextOnlyModel().to(device)
+    elif args.model == 'audio_only':
+        from baseline import AudioOnlyModel
+        model = AudioOnlyModel().to(device)
+    elif args.model == 'visual_only':
+        from baseline import VisualOnlyModel
+        model = VisualOnlyModel().to(device)
     else:
         raise ValueError(f"Неизвестная модель: {args.model}")
 

@@ -207,6 +207,64 @@ class LateFusionBaseline(nn.Module):
 
 
 # ══════════════════════════════════════════════════════════════════
+# UNIMODAL МОДЕЛИ — для ablation study
+# ══════════════════════════════════════════════════════════════════
+
+class TextOnlyModel(nn.Module):
+    """Только BERT — текстовая модальность"""
+    def __init__(self, num_classes=NUM_CLASSES, feat_dim=256):
+        super().__init__()
+        self.text_encoder = TextEncoder(output_dim=feat_dim)
+        self.classifier = nn.Sequential(
+            nn.Linear(feat_dim, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(128, num_classes),
+        )
+
+    def forward(self, text_inputs, audio_feat, visual_feat):
+        feat = self.text_encoder(
+            text_inputs['input_ids'],
+            text_inputs['attention_mask']
+        )
+        return self.classifier(feat)
+
+
+class AudioOnlyModel(nn.Module):
+    """Только 1D CNN — аудио модальность"""
+    def __init__(self, num_classes=NUM_CLASSES, feat_dim=256):
+        super().__init__()
+        self.audio_encoder = AudioCNNEncoder(output_dim=feat_dim)
+        self.classifier = nn.Sequential(
+            nn.Linear(feat_dim, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(128, num_classes),
+        )
+
+    def forward(self, text_inputs, audio_feat, visual_feat):
+        feat = self.audio_encoder(audio_feat)
+        return self.classifier(feat)
+
+
+class VisualOnlyModel(nn.Module):
+    """Только BiLSTM — визуальная модальность"""
+    def __init__(self, num_classes=NUM_CLASSES, feat_dim=256):
+        super().__init__()
+        self.visual_encoder = VisualBiLSTMEncoder(output_dim=feat_dim)
+        self.classifier = nn.Sequential(
+            nn.Linear(feat_dim, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(128, num_classes),
+        )
+
+    def forward(self, text_inputs, audio_feat, visual_feat):
+        feat = self.visual_encoder(visual_feat)
+        return self.classifier(feat)
+
+
+# ══════════════════════════════════════════════════════════════════
 # БЫСТРАЯ ПРОВЕРКА
 # ══════════════════════════════════════════════════════════════════
 
