@@ -98,7 +98,7 @@ class TextBERTEncoder(nn.Module):
 
         # Замораживаем BERT — не обучаем его веса
         for param in self.bert.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
 
         # Проекция 768 → output_dim
         self.head = nn.Sequential(
