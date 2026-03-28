@@ -17,7 +17,7 @@ NUM_CLASSES = 3     # happy, sad, anger
 EMOTION_NAMES = {0: 'happy', 1: 'sad', 2: 'anger'}
 
 # Веса классов для CrossEntropyLoss (из preprocessing)
-CLASS_WEIGHTS = torch.tensor([0.3, 2.5, 6.0], dtype=torch.float32)
+CLASS_WEIGHTS = torch.tensor([0.5, 1.5, 3.0], dtype=torch.float32)
 
 
 # ══════════════════════════════════════════════════════════════════
