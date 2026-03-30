@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import f1_score, accuracy_score, classification_report
 from tqdm import tqdm
 
-from dataset import get_dataloaders, CLASS_WEIGHTS, EMOTION_NAMES
+from dataset import get_dataloaders, CLASS_WEIGHTS, EMOTION_NAMES, NUM_CLASSES
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -264,7 +264,7 @@ def main():
     ts_loss, ts_wa, ts_f1, preds, labels_true = eval_epoch(
         model, test_loader, criterion, device)
 
-    emotion_list = [EMOTION_NAMES[i] for i in range(3)]
+    emotion_list = [EMOTION_NAMES[i] for i in range(NUM_CLASSES)]
     report = classification_report(
         labels_true, preds,
         target_names=emotion_list,

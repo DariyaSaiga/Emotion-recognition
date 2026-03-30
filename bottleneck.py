@@ -21,12 +21,12 @@ class VisualBiLSTMProjector(nn.Module):
 
     def __init__(self, d_model: int,
                  input_dim: int = VISUAL_DIM,
-                 hidden_dim: int = 64,
+                 hidden_dim: int = 128,
                  num_layers: int = 2):
         super().__init__()
 
         self.seq_len  = 7
-        self.step_dim = input_dim // self.seq_len  # 5
+        self.step_dim = input_dim // self.seq_len  # 713 // 7 = 101
 
         self.bilstm = nn.LSTM(
             input_size=self.step_dim,
@@ -46,14 +46,16 @@ class VisualBiLSTMProjector(nn.Module):
         self.modality_emb = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
 
     def forward(self, x):
-        """x: (B, 35) → (B, 1, d_model)"""
+        """x: (B, 713) → (B, 1, d_model)"""
         B = x.size(0)
-        x = x.view(B, self.seq_len, self.step_dim)  # (B, 7, 5)
+        # 713 // 7 = 101, но 7*101 = 707 — обрезаем 6 лишних значений
+        x = x[:, :self.seq_len * self.step_dim]     # (B, 707)
+        x = x.view(B, self.seq_len, self.step_dim)  # (B, 7, 101)
 
-        _, (hidden, _) = self.bilstm(x)             # hidden: (layers*2, B, 64)
-        forward_h  = hidden[-2]                      # (B, 64)
-        backward_h = hidden[-1]                      # (B, 64)
-        combined   = torch.cat([forward_h, backward_h], dim=1)  # (B, 128)
+        _, (hidden, _) = self.bilstm(x)              # hidden: (layers*2, B, 128)
+        forward_h  = hidden[-2]                       # (B, 128)
+        backward_h = hidden[-1]                       # (B, 128)
+        combined   = torch.cat([forward_h, backward_h], dim=1)  # (B, 256)
 
         out = self.proj(combined).unsqueeze(1)       # (B, 1, d_model)
         out = out + self.modality_emb                # + modality embedding

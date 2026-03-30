@@ -10,14 +10,14 @@ from sklearn.model_selection import train_test_split
 # КОНСТАНТЫ
 # ══════════════════════════════════════════════════════════════════
 
-AUDIO_DIM   = 74    # COVAREP признаки
-VISUAL_DIM  = 35    # Facet42 признаки
-NUM_CLASSES = 3     # happy, sad, anger
+AUDIO_DIM   = 74     # COVAREP признаки
+VISUAL_DIM  = 713    # Facet42 признаки (полный вектор)
+NUM_CLASSES = 4      # happy, sad, anger, disgust
 
-EMOTION_NAMES = {0: 'happy', 1: 'sad', 2: 'anger'}
+EMOTION_NAMES = {0: 'happy', 1: 'sad', 2: 'anger', 3: 'disgust'}
 
 # Веса классов для CrossEntropyLoss (из preprocessing)
-CLASS_WEIGHTS = torch.tensor([0.441, 2.149, 3.713], dtype=torch.float32)
+CLASS_WEIGHTS = torch.tensor([0.766, 0.766, 1.061, 2.243], dtype=torch.float32)
 
 
 # ══════════════════════════════════════════════════════════════════

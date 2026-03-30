@@ -108,13 +108,13 @@ class VisualBiLSTMEncoder(nn.Module):
     """
 
     def __init__(self, input_dim: int = VISUAL_DIM,
-                 hidden_dim: int = 64,
+                 hidden_dim: int = 128,
                  num_layers: int = 2,
                  output_dim: int = 256):
         super().__init__()
 
-        self.seq_len  = 7                        # разбиваем 35 признаков на 7 шагов
-        self.step_dim = input_dim // self.seq_len  # 5 признаков на шаг
+        self.seq_len  = 7                          # разбиваем на 7 шагов
+        self.step_dim = input_dim // self.seq_len  # 713 // 7 = 101
 
         self.bilstm = nn.LSTM(
             input_size=self.step_dim,
@@ -132,9 +132,10 @@ class VisualBiLSTMEncoder(nn.Module):
         )
 
     def forward(self, x):
-        """x: (B, 35)"""
+        """x: (B, 713)"""
         B = x.size(0)
-        # Разбиваем (B, 35) → (B, 7, 5)
+        # 713 // 7 = 101, но 7*101 = 707 — обрезаем 6 лишних значений
+        x = x[:, :self.seq_len * self.step_dim]   # (B, 707)
         x = x.view(B, self.seq_len, self.step_dim)
 
         # BiLSTM → out: (B, 7, 128), hidden: (num_layers*2, B, 64)
