@@ -12,12 +12,12 @@ from sklearn.model_selection import train_test_split
 
 AUDIO_DIM   = 74     # COVAREP признаки
 VISUAL_DIM  = 713    # Facet42 признаки (полный вектор)
-NUM_CLASSES = 4      # happy, sad, anger, disgust
+NUM_CLASSES = 3      # happy, sad, anger
 
-EMOTION_NAMES = {0: 'happy', 1: 'sad', 2: 'anger', 3: 'disgust'}
+EMOTION_NAMES = {0: 'happy', 1: 'sad', 2: 'anger'}
 
 # Веса классов для CrossEntropyLoss (из preprocessing)
-CLASS_WEIGHTS = torch.tensor([0.766, 0.766, 1.061, 2.243], dtype=torch.float32)
+CLASS_WEIGHTS = torch.tensor([0.574, 1.367, 1.894], dtype=torch.float32)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -164,22 +164,7 @@ def get_dataloaders(csv_path: str,
                    val_size: float = 0.15,
                    test_size: float = 0.15,
                    random_state: int = 42):
-    """
-    Создаёт DataLoader-ы для train / val / test.
 
-    Args:
-        csv_path     : путь к cmu_mosei_final.csv
-        batch_size   : размер батча
-        num_workers  : для DataLoader (0 = без параллелизма, хорошо для Colab)
-        max_text_len : максимальная длина текста для BERT
-        bert_name    : имя BERT модели
-        val_size     : доля валидации (0.15)
-        test_size    : доля теста (0.15)
-        random_state : для воспроизводимости
-
-    Returns:
-        train_loader, val_loader, test_loader
-    """
     print("Загружаем токенизатор BERT...")
     tokenizer = BertTokenizer.from_pretrained(bert_name)
 
