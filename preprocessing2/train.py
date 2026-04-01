@@ -111,7 +111,7 @@ def train(args):
         label_smoothing=0.1
     )
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
 
     best_val, patience_cnt = 0.0, 0
     history = defaultdict(list)

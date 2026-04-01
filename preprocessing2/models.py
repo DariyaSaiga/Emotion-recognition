@@ -74,15 +74,21 @@ class VisualBiLSTM(nn.Module):
         return self.fc(out)               # [B, 50, 128]
 
 
-class TextProjection(nn.Module):
-    """Проекция BERT. Вход: [B, 50, 768] → Выход: [B, 50, 128]"""
-    def __init__(self, bert_dim=768, output_dim=128, dropout=0.3):
+class TextBiGRU(nn.Module):
+    """BERT + Bi-GRU. Вход: [B, 50, 768] → Выход: [B, 50, 128]"""
+    def __init__(self, bert_dim=768, hidden_dim=100, output_dim=128, dropout=0.3):
         super().__init__()
-        self.proj = nn.Sequential(
-            nn.Linear(bert_dim, output_dim), nn.ReLU(), nn.Dropout(dropout))
+        self.fc  = nn.Linear(bert_dim, hidden_dim)
+        self.gru = nn.GRU(hidden_dim, hidden_dim, batch_first=True,
+                          bidirectional=True, num_layers=1)
+        self.proj = nn.Linear(hidden_dim * 2, output_dim)
+        self.drop = nn.Dropout(dropout)
 
     def forward(self, x):
-        return self.proj(x)  # [B, 50, 128]
+        # x: [B, 50, 768]
+        x   = torch.relu(self.fc(x))   # [B, 50, 100]
+        out, _ = self.gru(x)           # [B, 50, 200]
+        return self.proj(self.drop(out))  # [B, 50, 128]
 
 
 # ============================================================
@@ -162,8 +168,10 @@ class BottleneckModel(nn.Module):
         super().__init__()
         self.audio_enc  = AudioCNN(dropout=dropout)
         self.visual_enc = VisualBiLSTM(dropout=dropout)
-        self.text_enc   = TextProjection(dropout=dropout)
-        self.fusion     = BottleneckFusion(dropout=dropout)
+        self.text_enc   = TextBiGRU(dropout=dropout)
+        self.fusion     = BottleneckFusion(
+            seq_dim=128, bottleneck_dim=64,
+            num_tokens=16, num_heads=4, dropout=dropout)
         self.classifier = nn.Sequential(
             nn.Linear(64, 32), nn.ReLU(),
             nn.Dropout(dropout), nn.Linear(32, 3)
