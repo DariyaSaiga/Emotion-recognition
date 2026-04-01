@@ -14,7 +14,7 @@ class MoseiDataset(Dataset):
         counts = np.zeros(3)
         for s in self.samples.values():
             counts[s['label']] += 1
-        weights = counts.sum() / (3 * counts)
+        weights = np.log(counts.sum() / counts)
         self.class_weights = torch.FloatTensor(weights / weights.mean())
         print(f"[{split}] сэмплов={len(self.ids)} | "
               f"happy={int(counts[0])} sad={int(counts[1])} anger={int(counts[2])} | "
