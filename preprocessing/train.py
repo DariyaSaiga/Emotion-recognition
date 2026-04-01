@@ -2,7 +2,6 @@ import os
 import sys
 import argparse
 import pickle
-import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
@@ -10,303 +9,157 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
-# Подключаем наши файлы
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from dataset import get_dataloaders
-from models import AudioEncoder, VisualEncoder, TextEncoder, BottleneckModel
+from models import LateFusionBaseline, BottleneckModel
 
 
-# ============================================================
-# LATE FUSION BASELINE
-# Три независимых классификатора — предсказания усредняются
-# ============================================================
-
-class LateFusionBaseline(nn.Module):
-    def __init__(self, dropout=0.3):
-        super(LateFusionBaseline, self).__init__()
-
-        self.audio_encoder  = AudioEncoder(dropout=dropout)
-        self.visual_encoder = VisualEncoder(dropout=dropout)
-        self.text_encoder   = TextEncoder(dropout=dropout)
-
-        self.audio_classifier = nn.Sequential(
-            nn.Linear(128, 64), nn.ReLU(), nn.Dropout(dropout), nn.Linear(64, 3)
-        )
-        self.visual_classifier = nn.Sequential(
-            nn.Linear(128, 64), nn.ReLU(), nn.Dropout(dropout), nn.Linear(64, 3)
-        )
-        self.text_classifier = nn.Sequential(
-            nn.Linear(256, 64), nn.ReLU(), nn.Dropout(dropout), nn.Linear(64, 3)
-        )
-
-    def forward(self, audio, visual, text, mask=None):
-        audio_feat  = self.audio_encoder(audio)
-        visual_feat = self.visual_encoder(visual, mask)
-        text_feat   = self.text_encoder(text)
-
-        audio_logits  = self.audio_classifier(audio_feat)
-        visual_logits = self.visual_classifier(visual_feat)
-        text_logits   = self.text_classifier(text_feat)
-
-        # Late Fusion = среднее предсказаний трёх модальностей
-        return (audio_logits + visual_logits + text_logits) / 3.0
+def accuracy(logits, labels):
+    return (logits.argmax(-1) == labels).float().mean().item()
 
 
-# ============================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# ============================================================
-
-def compute_accuracy(logits, labels):
-    preds   = logits.argmax(dim=-1)
-    correct = (preds == labels).sum().item()
-    return correct / labels.size(0)
-
-
-def compute_per_class_accuracy(logits, labels, num_classes=3):
-    preds  = logits.argmax(dim=-1)
-    names  = {0: 'happy', 1: 'sad', 2: 'anger'}
-    result = {}
-    for c in range(num_classes):
-        mask = (labels == c)
-        if mask.sum() == 0:
-            result[names[c]] = 0.0
-            continue
-        result[names[c]] = (preds[mask] == labels[mask]).sum().item() / mask.sum().item()
-    return result
+def per_class_acc(logits, labels):
+    preds = logits.argmax(-1)
+    names = {0: 'happy', 1: 'sad', 2: 'anger'}
+    res = {}
+    for c in range(3):
+        m = (labels == c)
+        res[names[c]] = (preds[m] == labels[m]).float().mean().item() if m.sum() > 0 else 0.0
+    return res
 
 
-# ============================================================
-# ОДНА ЭПОХА ОБУЧЕНИЯ
-# ============================================================
+def run_epoch(model, loader, optimizer, criterion, device, train=True):
+    model.train() if train else model.eval()
+    total_loss, all_logits, all_labels = 0, [], []
 
-def train_epoch(model, loader, optimizer, criterion, device):
-    model.train()
-    total_loss = 0.0
-    all_logits, all_labels = [], []
-
-    for audio, visual, text, labels, mask in loader:
-        audio, visual, text = audio.to(device), visual.to(device), text.to(device)
-        labels, mask        = labels.to(device), mask.to(device)
-
-        optimizer.zero_grad()
-        logits = model(audio, visual, text, mask)
-        loss   = criterion(logits, labels)
-        loss.backward()
-
-        # Gradient clipping — ограничиваем градиенты чтобы обучение не ломалось
-        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-        optimizer.step()
-
-        total_loss += loss.item()
-        all_logits.append(logits.detach().cpu())
-        all_labels.append(labels.detach().cpu())
-
-    all_logits = torch.cat(all_logits)
-    all_labels = torch.cat(all_labels)
-
-    return (total_loss / len(loader),
-            compute_accuracy(all_logits, all_labels),
-            compute_per_class_accuracy(all_logits, all_labels))
-
-
-# ============================================================
-# ОЦЕНКА НА VAL / TEST
-# ============================================================
-
-def evaluate(model, loader, criterion, device):
-    """
-    Оцениваем без изменения весов.
-    torch.no_grad() — не считаем градиенты, быстрее и меньше памяти.
-    model.eval()    — выключаем Dropout.
-    """
-    model.eval()
-    total_loss = 0.0
-    all_logits, all_labels = [], []
-
-    with torch.no_grad():
+    ctx = torch.enable_grad() if train else torch.no_grad()
+    with ctx:
         for audio, visual, text, labels, mask in loader:
             audio, visual, text = audio.to(device), visual.to(device), text.to(device)
-            labels, mask        = labels.to(device), mask.to(device)
+            labels, mask = labels.to(device), mask.to(device)
 
-            logits     = model(audio, visual, text, mask)
-            total_loss += criterion(logits, labels).item()
-            all_logits.append(logits.cpu())
+            logits = model(audio, visual, text, mask)
+            loss   = criterion(logits, labels)
+
+            if train:
+                optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+
+            total_loss += loss.item()
+            all_logits.append(logits.detach().cpu())
             all_labels.append(labels.cpu())
 
     all_logits = torch.cat(all_logits)
     all_labels = torch.cat(all_labels)
-
-    return (total_loss / len(loader),
-            compute_accuracy(all_logits, all_labels),
-            compute_per_class_accuracy(all_logits, all_labels))
+    return total_loss / len(loader), accuracy(all_logits, all_labels), per_class_acc(all_logits, all_labels)
 
 
-# ============================================================
-# ГРАФИКИ
-# ============================================================
-
-def save_plots(history, model_name, save_dir):
+def save_plots(history, name, save_dir):
     epochs = range(1, len(history['train_loss']) + 1)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-
-    ax1.plot(epochs, history['train_loss'], 'b-', label='Train Loss')
-    ax1.plot(epochs, history['val_loss'],   'r-', label='Val Loss')
-    ax1.set_title(f'{model_name} — Loss')
-    ax1.set_xlabel('Эпоха')
-    ax1.set_ylabel('Loss')
-    ax1.legend()
-    ax1.grid(True)
-
-    ax2.plot(epochs, history['train_acc'], 'b-', label='Train Accuracy')
-    ax2.plot(epochs, history['val_acc'],   'r-', label='Val Accuracy')
-    ax2.axhline(y=0.70, color='g', linestyle='--', alpha=0.7, label='Цель 70%')
-    ax2.set_title(f'{model_name} — Accuracy')
-    ax2.set_xlabel('Эпоха')
-    ax2.set_ylabel('Accuracy')
-    ax2.set_ylim(0, 1)
-    ax2.legend()
-    ax2.grid(True)
-
+    ax1.plot(epochs, history['train_loss'], label='Train')
+    ax1.plot(epochs, history['val_loss'],   label='Val')
+    ax1.set_title(f'{name} Loss'); ax1.legend(); ax1.grid()
+    ax2.plot(epochs, history['train_acc'], label='Train')
+    ax2.plot(epochs, history['val_acc'],   label='Val')
+    ax2.axhline(0.70, color='g', linestyle='--', label='70%')
+    ax2.set_title(f'{name} Accuracy'); ax2.set_ylim(0, 1); ax2.legend(); ax2.grid()
     plt.tight_layout()
-    path = os.path.join(save_dir, f'{model_name}_curves.png')
-    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(save_dir, f'{name}_curves.png'), dpi=150)
     plt.close()
-    print(f"    График сохранён: {path}")
 
-
-# ============================================================
-# ГЛАВНАЯ ФУНКЦИЯ
-# ============================================================
 
 def train(args):
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"\nУстройство: {device}")
-    if device.type == 'cuda':
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f'Device: {device}')
 
     save_dir = os.path.join(args.output_dir, args.model)
     os.makedirs(save_dir, exist_ok=True)
 
     train_loader, val_loader, test_loader, class_weights = get_dataloaders(
-        args.pkl_path, batch_size=args.batch_size, num_workers=0,
-    )
+        args.pkl_path, args.batch_size)
 
-    print(f"\nМодель: {args.model}")
-    if args.model == 'baseline':
-        model = LateFusionBaseline(dropout=args.dropout)
-    else:
-        model = BottleneckModel(dropout=args.dropout)
-
+    model = LateFusionBaseline(args.dropout) if args.model == 'baseline' \
+            else BottleneckModel(args.dropout)
     model = model.to(device)
-    print(f"Параметров: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-    criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
+    params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f'Model: {args.model} | Params: {params:,}')
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights.to(device), label_smoothing=0.1)
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
-    best_val_acc   = 0.0
-    patience_count = 0
-    history        = defaultdict(list)
+    best_val, patience_cnt, history = 0.0, 0, defaultdict(list)
 
-    print(f"\nЭпох: {args.epochs} | Батч: {args.batch_size} | LR: {args.lr}")
-    print("=" * 65)
-    print(f"{'Эпоха':>6} | {'Train Loss':>10} | {'Train Acc':>9} | "
-          f"{'Val Loss':>8} | {'Val Acc':>7} | {'LR':>8}")
-    print("-" * 65)
+    print(f'\nEpochs: {args.epochs} | Batch: {args.batch_size} | LR: {args.lr}')
+    print('=' * 65)
+    print(f"{'Epoch':>6} | {'Train Loss':>10} | {'Train Acc':>9} | {'Val Loss':>8} | {'Val Acc':>7}")
+    print('-' * 65)
 
     for epoch in range(1, args.epochs + 1):
+        tr_loss, tr_acc, tr_pc = run_epoch(model, train_loader, optimizer, criterion, device, train=True)
+        vl_loss, vl_acc, vl_pc = run_epoch(model, val_loader,   optimizer, criterion, device, train=False)
+        scheduler.step(vl_loss)
 
-        train_loss, train_acc, train_pc = train_epoch(
-            model, train_loader, optimizer, criterion, device)
+        history['train_loss'].append(tr_loss)
+        history['train_acc'].append(tr_acc)
+        history['val_loss'].append(vl_loss)
+        history['val_acc'].append(vl_acc)
 
-        val_loss, val_acc, val_pc = evaluate(
-            model, val_loader, criterion, device)
-
-        scheduler.step(val_loss)
-        current_lr = optimizer.param_groups[0]['lr']
-
-        history['train_loss'].append(train_loss)
-        history['train_acc'].append(train_acc)
-        history['val_loss'].append(val_loss)
-        history['val_acc'].append(val_acc)
-
-        print(f"{epoch:>6} | {train_loss:>10.4f} | {train_acc:>8.1%} | "
-              f"{val_loss:>8.4f} | {val_acc:>6.1%} | {current_lr:>8.2e}")
+        print(f'{epoch:>6} | {tr_loss:>10.4f} | {tr_acc:>8.1%} | {vl_loss:>8.4f} | {vl_acc:>6.1%}')
 
         if epoch % 5 == 0:
-            print(f"         Train: happy={train_pc['happy']:.1%}  "
-                  f"sad={train_pc['sad']:.1%}  anger={train_pc['anger']:.1%}")
-            print(f"         Val:   happy={val_pc['happy']:.1%}  "
-                  f"sad={val_pc['sad']:.1%}  anger={val_pc['anger']:.1%}")
+            print(f'       Train: happy={tr_pc["happy"]:.1%} sad={tr_pc["sad"]:.1%} anger={tr_pc["anger"]:.1%}')
+            print(f'       Val:   happy={vl_pc["happy"]:.1%} sad={vl_pc["sad"]:.1%} anger={vl_pc["anger"]:.1%}')
 
-        if val_acc > best_val_acc:
-            best_val_acc   = val_acc
-            patience_count = 0
-            best_path      = os.path.join(save_dir, f'{args.model}_best.pt')
-            torch.save({'epoch': epoch, 'model_state': model.state_dict(),
-                        'val_acc': val_acc}, best_path)
-            print(f"         ★ Лучший val acc: {val_acc:.1%} — сохранено")
+        if vl_acc > best_val:
+            best_val, patience_cnt = vl_acc, 0
+            best_path = os.path.join(save_dir, f'{args.model}_best.pt')
+            torch.save({'epoch': epoch, 'model_state': model.state_dict(), 'val_acc': vl_acc}, best_path)
+            print(f'       ★ Best val acc: {vl_acc:.1%} saved')
         else:
-            patience_count += 1
+            patience_cnt += 1
+            if patience_cnt >= args.patience:
+                print(f'\nEarly stopping at epoch {epoch}')
+                break
 
-        if patience_count >= args.patience:
-            print(f"\nEarly stopping на эпохе {epoch}")
-            break
+    print('=' * 65)
 
-    print("=" * 65)
+    model.load_state_dict(torch.load(best_path, map_location=device)['model_state'])
+    ts_loss, ts_acc, ts_pc = run_epoch(model, test_loader, optimizer, criterion, device, train=False)
 
-    # Финальный тест
-    print("\nОцениваем на test...")
-    checkpoint = torch.load(best_path, map_location=device)
-    model.load_state_dict(checkpoint['model_state'])
-    test_loss, test_acc, test_pc = evaluate(model, test_loader, criterion, device)
-
-    print(f"\n{'='*40}")
-    print(f"РЕЗУЛЬТАТЫ: {args.model.upper()}")
-    print(f"{'='*40}")
-    print(f"  Val  Accuracy: {best_val_acc:.1%}")
-    print(f"  Test Accuracy: {test_acc:.1%}")
-    print(f"  По классам:")
-    print(f"    happy: {test_pc['happy']:.1%}")
-    print(f"    sad:   {test_pc['sad']:.1%}")
-    print(f"    anger: {test_pc['anger']:.1%}")
-    print(f"{'='*40}")
+    print(f'\n{"="*40}')
+    print(f'RESULTS: {args.model.upper()}')
+    print(f'{"="*40}')
+    print(f'  Val  Accuracy: {best_val:.1%}')
+    print(f'  Test Accuracy: {ts_acc:.1%}')
+    print(f'  happy: {ts_pc["happy"]:.1%} | sad: {ts_pc["sad"]:.1%} | anger: {ts_pc["anger"]:.1%}')
+    print(f'{"="*40}')
 
     save_plots(history, args.model, save_dir)
 
-    metrics = {
-        'model': args.model, 'best_val_acc': best_val_acc,
-        'test_acc': test_acc, 'test_per_class': test_pc,
-        'history': dict(history),
-    }
     with open(os.path.join(save_dir, f'{args.model}_metrics.pkl'), 'wb') as f:
-        pickle.dump(metrics, f)
+        pickle.dump({'model': args.model, 'best_val': best_val,
+                     'test_acc': ts_acc, 'test_pc': ts_pc, 'history': dict(history)}, f)
 
-    print(f"\nВсе файлы сохранены в: {save_dir}")
-    return metrics
+    print(f'Saved to: {save_dir}')
 
-
-# ============================================================
-# АРГУМЕНТЫ
-# ============================================================
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--model',      type=str,   default='bottleneck',
-                   choices=['baseline', 'bottleneck'])
-    p.add_argument('--pkl_path',   type=str,
-                   default='/content/drive/MyDrive/Diploma2/mosei_clean.pkl')
-    p.add_argument('--output_dir', type=str,
-                   default='/content/drive/MyDrive/Diploma/results')
-    p.add_argument('--epochs',     type=int,   default=30)
+    p.add_argument('--model',      default='bottleneck', choices=['baseline', 'bottleneck'])
+    p.add_argument('--pkl_path',   default='/content/drive/MyDrive/Diploma2/mosei_clean.pkl')
+    p.add_argument('--output_dir', default='/content/drive/MyDrive/Diploma2/results_v3')
+    p.add_argument('--epochs',     type=int,   default=40)
     p.add_argument('--batch_size', type=int,   default=64)
     p.add_argument('--lr',         type=float, default=1e-4)
     p.add_argument('--dropout',    type=float, default=0.3)
-    p.add_argument('--patience',   type=int,   default=10)
+    p.add_argument('--patience',   type=int,   default=12)
     return p.parse_args()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     train(parse_args())
