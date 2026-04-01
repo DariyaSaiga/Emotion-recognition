@@ -120,9 +120,11 @@ class BottleneckModel(nn.Module):
         self.audio_enc  = AudioEncoder(dropout=dropout)
         self.visual_enc = VisualEncoder(dropout=dropout)
         self.text_enc   = TextEncoder(dropout=dropout)
-        self.fusion     = BottleneckFusion(dropout=dropout)
+        self.fusion     = BottleneckFusion(
+            bottleneck_dim=64, num_tokens=4, num_heads=4, dropout=dropout
+        )
         self.classifier = nn.Sequential(
-            nn.Linear(128, 64), nn.ReLU(), nn.Dropout(dropout), nn.Linear(64, 3)
+            nn.Linear(64, 32), nn.ReLU(), nn.Dropout(dropout), nn.Linear(32, 3)
         )
 
     def forward(self, audio, visual, text, mask=None):
