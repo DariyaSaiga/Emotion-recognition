@@ -14,14 +14,13 @@ class MoseiDataset(Dataset):
         counts = np.zeros(3)
         for s in self.samples.values():
             counts[s['label']] += 1
-
-        # Мягкие веса через log — не такие агрессивные как counts.sum()/(3*counts)
-        weights = np.log1p(counts.sum() / counts)
+        weights = np.log(counts.sum() / counts)
         self.class_weights = torch.FloatTensor(weights / weights.mean())
-
-        print(f'[{split}] n={len(self.ids)} | '
-              f'happy={int(counts[0])} sad={int(counts[1])} anger={int(counts[2])} | '
-              f'w=[{self.class_weights[0]:.2f} {self.class_weights[1]:.2f} {self.class_weights[2]:.2f}]')
+        print(f"[{split}] сэмплов={len(self.ids)} | "
+              f"happy={int(counts[0])} sad={int(counts[1])} anger={int(counts[2])} | "
+              f"веса: happy={self.class_weights[0]:.2f} "
+              f"sad={self.class_weights[1]:.2f} "
+              f"anger={self.class_weights[2]:.2f}")
 
     def __len__(self):
         return len(self.ids)
@@ -29,14 +28,13 @@ class MoseiDataset(Dataset):
     def __getitem__(self, idx):
         s = self.samples[self.ids[idx]]
 
-        audio,  mask = self._pad(s['audio'],  MAX_SEQ_LEN)  # [50, 74]
-        visual, _    = self._pad(s['visual'], MAX_SEQ_LEN)  # [50, 713]
+        audio,  mask = self._pad(s['audio'],  MAX_SEQ_LEN)
+        visual, _    = self._pad(s['visual'], MAX_SEQ_LEN)
 
-        # Текст теперь [768] — один вектор на предложение
         if s['text'] is not None:
-            text = s['text'].copy()   # [768]
+            text, _ = self._pad(s['text'], MAX_SEQ_LEN)
         else:
-            text = np.zeros(768, dtype=np.float32)
+            text = np.zeros((MAX_SEQ_LEN, 768), dtype=np.float32)
 
         return (torch.FloatTensor(audio),
                 torch.FloatTensor(visual),
@@ -50,13 +48,14 @@ class MoseiDataset(Dataset):
         if seq_len >= max_len:
             mask[:] = 1.0
             return arr[:max_len].copy(), mask
-        pad = np.zeros((max_len - seq_len, feat_dim), dtype=np.float32)
+        pad    = np.zeros((max_len - seq_len, feat_dim), dtype=np.float32)
         mask[:seq_len] = 1.0
         return np.concatenate([arr, pad], axis=0), mask
 
 
 def get_dataloaders(pkl_path, batch_size=32, num_workers=0):
-    print(f'\nЗагружаем: {pkl_path}')
+    from torch.utils.data import WeightedRandomSampler
+    print(f"\nЗагружаем: {pkl_path}")
     with open(pkl_path, 'rb') as f:
         data = pickle.load(f)
 
@@ -64,8 +63,18 @@ def get_dataloaders(pkl_path, batch_size=32, num_workers=0):
     val_ds   = MoseiDataset(data, 'val')
     test_ds  = MoseiDataset(data, 'test')
 
+    # WeightedRandomSampler: каждый класс видится одинаково часто
+    # Решает проблему happy=11k vs anger=2k
+    labels  = [train_ds.samples[sid]['label'] for sid in train_ds.ids]
+    counts  = np.bincount(labels)
+    w       = 1.0 / counts
+    weights = torch.FloatTensor([w[l] for l in labels])
+    sampler = WeightedRandomSampler(weights,
+                                    num_samples=len(weights),
+                                    replacement=True)
+
     train_loader = DataLoader(train_ds, batch_size=batch_size,
-                              shuffle=True,  num_workers=num_workers,
+                              sampler=sampler, num_workers=num_workers,
                               drop_last=True)
     val_loader   = DataLoader(val_ds,   batch_size=batch_size,
                               shuffle=False, num_workers=num_workers)
