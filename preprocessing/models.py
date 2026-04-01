@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class AudioEncoder(nn.Module):
     """1D-CNN для аудио. Вход: [B, 50, 74]"""
 
@@ -67,21 +68,25 @@ class TextEncoder(nn.Module):
 class LateFusionBaseline(nn.Module):
     def __init__(self, dropout=0.3):
         super().__init__()
-        self.audio_proj  = nn.Sequential(
-            nn.Linear(74,  128), nn.ReLU(), nn.Dropout(dropout))
-        self.visual_proj = nn.Sequential(
-            nn.Linear(713, 128), nn.ReLU(), nn.Dropout(dropout))
-        self.text_proj   = nn.Sequential(
-            nn.Linear(768, 128), nn.ReLU(), nn.Dropout(dropout))
+        self.audio_enc  = AudioEncoder(dropout=dropout)
+        self.visual_enc = VisualEncoder(dropout=dropout)
+        self.text_enc   = TextEncoder(output_dim=128, dropout=dropout)
 
-        self.audio_cls  = nn.Linear(128, 3)
-        self.visual_cls = nn.Linear(128, 3)
-        self.text_cls   = nn.Linear(128, 3)
+        # Три независимых классификатора
+        self.audio_cls  = nn.Sequential(
+            nn.Linear(128, 64), nn.ReLU(), nn.Dropout(dropout), nn.Linear(64, 3)
+        )
+        self.visual_cls = nn.Sequential(
+            nn.Linear(128, 64), nn.ReLU(), nn.Dropout(dropout), nn.Linear(64, 3)
+        )
+        self.text_cls   = nn.Sequential(
+            nn.Linear(128, 64), nn.ReLU(), nn.Dropout(dropout), nn.Linear(64, 3)
+        )
 
     def forward(self, audio, visual, text, mask=None):
-        af = self.audio_proj(audio.mean(dim=1))
-        vf = self.visual_proj(visual.mean(dim=1))
-        tf = self.text_proj(text.mean(dim=1))
+        af = self.audio_enc(audio)
+        vf = self.visual_enc(visual)
+        tf = self.text_enc(text)
         return (self.audio_cls(af) +
                 self.visual_cls(vf) +
                 self.text_cls(tf)) / 3.0
