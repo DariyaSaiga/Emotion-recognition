@@ -6,8 +6,8 @@ from sklearn.preprocessing import StandardScaler
 from collections import defaultdict
 
 # -------------------------------------------------------
-HDF5_PATH   = "/Users/dariyaablanova/Downloads/mosei.hdf5"
-CLEAN_PATH  = "/Users/dariyaablanova/Desktop/unic_work/Diploma/mosei_clean.pkl"  # перезапишем
+HDF5_PATH   = "/Users/Лейла/Downloads/mosei.hdf5"
+CLEAN_PATH  = "/Users/Лейла/Desktop/mosei_clean.pkl"  # перезапишем
 # -------------------------------------------------------
 
 CLASS_MAP   = {'happiness': 0, 'sadness': 1, 'anger': 2}

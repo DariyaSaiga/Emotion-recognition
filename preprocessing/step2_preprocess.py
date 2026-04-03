@@ -14,8 +14,8 @@ from collections import defaultdict
 # -------------------------------------------------------
 # ПОМЕНЯЙ ПУТИ НА СВОИ
 # -------------------------------------------------------
-HDF5_PATH   = "/Users/dariyaablanova/Downloads/mosei.hdf5"
-OUTPUT_PATH = "/Users/dariyaablanova/Desktop/unic_work/Diploma/mosei_clean.pkl"
+HDF5_PATH   = "/Users/Лейла/Downloads/mosei.hdf5"
+OUTPUT_PATH = "/Users/Лейла/Desktop/mosei_clean.pkl"
 # -------------------------------------------------------
 
 # All Labels: [sentiment, happiness, sadness, anger, surprise, disgust, fear]
@@ -83,7 +83,7 @@ def assign_label(labels_flat):
         'anger':     labels_flat[3],
     }
     dominant = max(scores, key=scores.get)
-    if scores[dominant] < 0.5:
+    if scores[dominant] < 0.3:
         return None
     return CLASS_MAP[dominant]
 

@@ -6,7 +6,7 @@
 import h5py
 import numpy as np
 
-HDF5_PATH = "/Users/dariyaablanova/Downloads/mosei.hdf5"
+HDF5_PATH = "/Users/Лейла/Downloads/mosei.hdf5"
 
 
 def print_tree(obj, indent=0):

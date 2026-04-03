@@ -2,7 +2,7 @@ import h5py
 import numpy as np
 import sys
 
-HDF5_PATH = "/Users/dariyaablanova/Downloads/mosei.hdf5"
+HDF5_PATH = "/Users/Лейла/Downloads/mosei.hdf5"
 
 
 def explore_hdf5(path):
@@ -61,11 +61,23 @@ def explore_hdf5(path):
                 print(f"    ID сэмпла: {sample_id}")
                 for mod2 in modalities:
                     try:
-                        arr = f[mod2][sample_id][()]
-                        nan_count = np.isnan(arr).sum()
-                        print(f"    {mod2}: shape={arr.shape}, "
-                              f"min={arr.min():.3f}, max={arr.max():.3f}, "
-                              f"NaN={nan_count}")
+                        group = f[mod2][sample_id]
+
+                        if isinstance(group, h5py.Group):
+                            if 'features' in group:
+                                arr = group['features'][()]
+                                nan_count = np.isnan(arr).sum()
+                                print(f"    {mod2}: shape={arr.shape}, "
+                                    f"min={arr.min():.3f}, max={arr.max():.3f}, "
+                                    f"NaN={nan_count}")
+                            else:
+                                print(f"    {mod2}: нет 'features'")
+                        else:
+                            arr = group[()]
+                            nan_count = np.isnan(arr).sum()
+                            print(f"    {mod2}: shape={arr.shape}, "
+                                f"min={arr.min():.3f}, max={arr.max():.3f}, "
+                                f"NaN={nan_count}")
                     except Exception as e:
                         print(f"    {mod2}: недоступно ({e})")
 
